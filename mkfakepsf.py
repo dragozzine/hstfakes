@@ -55,11 +55,10 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
     #  the fits header. 
 
     import time
-    from numpy import iterable, arange,zeros
+    from numpy import iterable, zeros
     from scipy.ndimage import zoom
     from util.fitsio import tofits
-    from tools import hstsnphot
-     
+    import cntrd
     import pyfits
 
     imhdr0 = pyfits.getheader( fltfile, ext=0 )
@@ -81,6 +80,7 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
         if filter1.startswith('F') : filt=filter1
         else : filt=filter2
         ccdchip = imhdr['CCDCHIP']
+
 
     if not os.path.isfile( specfile ) : 
         tinytimdir = os.environ['TINYTIM']
@@ -154,7 +154,7 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
 
     xgeo_offsets = []
     ygeo_offsets = []
-    fluxcorrs = []
+    # fluxcorrs = []  # 2014.07.18 Flux correction disabled by Steve
     #run tiny3 and measure the how much offset the geometric distortion adds
     for Npsf in range(len(x)): 
         command3 =  "%s %s.%i.in POS=%i"%(
@@ -176,14 +176,16 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
         xcen = float(xdim/2 + 1)
         ycen = float(ydim/2 + 1)
         
-        #run phot and measure the center and the aperture correction
+        #run phot to measure the true center position
         if instrument =='WFC3': instrument = instrument +'_'+detector
-        meas_xcen, meas_ycen,meas_fluxcorr = hstsnphot.get_fake_centroid_and_fluxcorr(this_stamp,xcen,ycen,instrument,filt)
+        pixscale = getpixscale( this_stamp )
+        fwhmpix = 0.13 / pixscale  # approximate HST psf size, in pixels
+        meas_xcen, meas_ycen = cntrd.cntrd(this_stamp,xcen,ycen,fwhmpix)
         #Subtract the expected center from the measured center
         #Save the offsets
         xgeo_offsets.append(meas_xcen - xcen)
         ygeo_offsets.append(meas_ycen - ycen)
-        fluxcorrs.append(meas_fluxcorr)
+        # fluxcorrs.append(meas_fluxcorr)
         #Move this stamp so that it doesn't get overwritten.
         os.rename(this_stamp,os.path.splitext(this_stamp)[0]+'_tiny3.fits')
         
@@ -198,7 +200,7 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
         os.system( command3 ) 
 
     outstamplist = []
-    for xx,yy,psfstamp,xgeo,ygeo,fluxcorr in zip( x,y,psfstamplist,xgeo_offsets,ygeo_offsets,fluxcorrs):
+    for xx,yy,psfstamp,xgeo,ygeo in zip( x,y,psfstamplist,xgeo_offsets,ygeo_offsets):
         if verbose : print("sub-sampling psf at %.2f %.2f to 0.01 pix"%(xx,yy))
 
         # read in tiny3 output psf (sub-sampled to a 5th of a pixel)
@@ -310,10 +312,11 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
 
         psfdat2 = convolvepsf( psfdat1, kernel )
 
-        #Rescale the TinyTim psf to match the measured aperture corrections.
-        
-        psfdat2 *= fluxcorr
-        if verbose : print('Applying a %f flux correction to the TinyTim psf.' % fluxcorr)
+        # 2014.07.18 : Disabled by Steve
+        # Rescale the TinyTim psf to match the measured aperture corrections.
+        # psfdat2 *= fluxcorr
+        # if verbose : print('Applying a %f flux correction to the TinyTim psf.' % fluxcorr)
+
         # write out the new recentered psf stamp
         outstamp = psfstamp.replace('.fits','_final.fits')
         hdr['naxis1']=psfdat2.shape[1]
@@ -356,3 +359,103 @@ def getCDkernel( imheader ) :
     for i in range(-3,0) : 
         kernel.append( [ float(val) for val in imheader[i].split() ] )
     return( kernel )
+
+def get_fake_centroid(filename,x,y,instrument,filt):
+    """
+    Locate the center of a fake psf
+
+    INPUTS: The fake-SN psf image in filename, the expected x,y position
+    of the center of the psf, the instrument and filter being modeled.
+    RETURNS: xcentroid, ycentroid, fluxcorr
+    """
+    from pyraf import iraf
+
+    iraf.digiphot(_doprint=0)
+    iraf.apphot(_doprint=0)
+    iraf.unlearn(iraf.apphot.phot)
+    iraf.unlearn(iraf.datapars)
+    iraf.unlearn(iraf.centerpars)
+    #Use the centroid algorithm right now as it seems more robust to geometric distortion.
+    iraf.centerpars.calgorithm = 'centroid'
+    iraf.centerpars.cbox = 5.0
+
+    iraf.unlearn(iraf.fitskypars)
+    iraf.unlearn(iraf.photpars)
+    photparams = {
+        'interac':False,
+        'radplot':False,
+        }
+    iraf.datapars.readnoise = 0.0
+    iraf.datapars.itime = 1.0
+    iraf.datapars.epadu = 1.0
+
+    # iraf.digiphot.apphot.fitskypars :
+    iraf.unlearn(iraf.fitskypars)
+    iraf.fitskypars.salgorithm = 'constant'
+    iraf.fitskypars.skyvalue = 0.0
+
+    # iraf.digiphot.apphot.photpars :
+    iraf.unlearn(iraf.photpars)
+    iraf.photpars.weighting = 'constant'
+    iraf.photpars.apertures = 20   # TODO : set this more intelligently !
+    iraf.photpars.zmag = 25
+    iraf.photpars.mkapert = False
+
+    #Write the coordinate file starting as position x and y
+    coxyfile = 'centroid.xycoo'
+    coxy = open(coxyfile, 'w')
+    print >> coxy, "%10.2f  %10.2f" % (x,y)
+    coxy.close()
+    if os.path.exists('centroid.mag'): os.remove('centroid.mag')
+    iraf.phot(image=filename, skyfile='', coords=coxyfile, output='centroid.mag',
+              verify=False, verbose=True, Stdout=1, **photparams)
+    f = open('centroid.mag', 'r')
+    maglines = f.readlines()
+    f.close()
+    xcentroid = float(maglines[76].split()[0])
+    ycentroid = float(maglines[76].split()[1])
+
+    return xcentroid,ycentroid
+
+def getpixscale( fitsfile, returntuple=False, ext=0 ):
+    """ Compute the pixel scale of the reference pixel in arcsec/pix in
+    each direction from the fits header cd matrix.
+    With returntuple=True, return the two pixel scale values along the x and y
+    axes.  For returntuple=False, return the average of the two.
+    The input fitsfile may be a string giving a fits filename, a
+    pyfits hdulist or hdu.
+    """
+    from math import sqrt
+    import pyfits
+
+    hdr = pyfits.getheader( fitsfile, ext=ext )
+    if 'CD1_1' in hdr :
+        cd11 = hdr['CD1_1']
+        cd12 = hdr['CD1_2']
+        cd21 = hdr['CD2_1']
+        cd22 = hdr['CD2_2']
+
+        # define the sign based on determinant
+        det = cd11*cd22 - cd12*cd21
+        if det<0 : sgn = -1
+        else : sgn = 1
+
+        if cd12==0 and cd21==0 :
+            # no rotation: x=RA, y=Dec
+            cdelt1 = cd11
+            cdelt2 = cd22
+        else :
+            cdelt1 = sgn*sqrt(cd11**2 + cd12**2)
+            cdelt2 = sqrt(cd22**2 + cd21**2)
+    elif 'CDELT1' in hdr.keys() and (hdr['CDELT1']!=1 and hdr['CDELT2']!=1) :
+        cdelt1 = hdr['CDELT1']
+        cdelt2 = hdr['CDELT2']
+
+    cdelt1 = cdelt1  * 3600.
+    cdelt2 = cdelt2  * 3600.
+
+    if returntuple :
+        return( cdelt1, cdelt2 )
+    else :
+        return( (abs(cdelt1)+abs(cdelt2)) / 2. )
+
