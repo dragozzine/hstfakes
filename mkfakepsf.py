@@ -83,6 +83,7 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
         else : filt=filter2
         ccdchip = imhdr['CCDCHIP']
 
+    pixscale = getpixscale( fltfile, ext=('SCI',1) )
 
     if not os.path.isfile( specfile ) : 
         if 'TINYTIM' in os.environ :
@@ -193,9 +194,10 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
         
         #run phot to measure the true center position
         if instrument =='WFC3': instrument = instrument +'_'+detector
-        pixscale = getpixscale( this_stamp )
         fwhmpix = 0.13 / pixscale  # approximate HST psf size, in pixels
-        meas_xcen, meas_ycen = cntrd.cntrd(this_stamp,xcen,ycen,fwhmpix)
+        this_stamp_data = pyfits.getdata( this_stamp )
+        meas_xcen, meas_ycen = cntrd.cntrd(this_stamp_data,xcen,ycen,fwhmpix)
+
         #Subtract the expected center from the measured center
         #Save the offsets
         xgeo_offsets.append(meas_xcen - xcen)
@@ -336,8 +338,7 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
         outstamp = psfstamp.replace('.fits','_final.fits')
         hdr['naxis1']=psfdat2.shape[1]
         hdr['naxis2']=psfdat2.shape[0]
-        psfim.writeto( outstamp, psfdat2, header=hdr, clobber=True )
-        outstamplist.append( outstamp )
+        pyfits.writeto( outstamp, psfdat2, header=hdr, clobber=True )
         if verbose : print("    Shifted, resampled psf written to %s"%outstamp)
 
     # return a list of  psf stamps 
