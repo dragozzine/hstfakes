@@ -16,6 +16,8 @@ TODO: add an option for using measured psfs in place of TinyTim.
 """
 import exceptions
 import os
+import sys
+
 # WFC3-IR inter-pixel capacitance kernel
 # Outdated kernel reported in TinyTim WFC3 manual: 
 # # http://tinytim.stsci.edu/static/TinyTim_WFC3.pdf
@@ -37,7 +39,7 @@ PSFSIZE = 2.0
 
 def mkTinyTimPSF( x, y, fltfile, ext=1,
                   fileroot='tinytim', psfdir='tinytim',
-                  specfile='sn1a+00_Hsiao_tinytim.dat',
+                  specfile='flat_flam_tinytim.dat',
                   verbose=False, clobber=False ):
     """ run tinytim to construct a model psf 
     in the distorted (flt) frame
@@ -57,7 +59,7 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
     import time
     from numpy import iterable, zeros
     from scipy.ndimage import zoom
-    from util.fitsio import tofits
+    # from util.fitsio import tofits
     import cntrd
     import pyfits
 
@@ -83,14 +85,28 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
 
 
     if not os.path.isfile( specfile ) : 
-        tinytimdir = os.environ['TINYTIM']
-        specfile = os.path.join( tinytimdir, specfile ) 
-    if not os.path.isfile( specfile ) : 
-        raise exceptions.RuntimeError("Can't find TinyTim spec file %s"%specfile)
+        if 'TINYTIM' in os.environ :
+            tinytimdir = os.environ['TINYTIM']
+            specfile = os.path.join( tinytimdir, specfile )
+    if not os.path.isfile( specfile ) :
+        thisfile = sys.argv[0]
+        if thisfile.startswith('ipython'): thisfile = __file__
+        thisdir = os.path.dirname( thisfile )
+        specfile = os.path.join( thisdir, specfile )
+    if not os.path.isfile( specfile ) :
+        raise exceptions.RuntimeError("Can't find TinyTim spec file %s"%
+                                      os.path.basename(specfile) )
+    if verbose :
+        print( "Using TinyTim spectrum file : %s"%specfile )
 
     if not iterable(x) : x = [x]
     if not iterable(y) : y = [y]
-    coordfile = "%s.%02i.coord"%(os.path.join(psfdir,fileroot),ext)
+
+    if iterable( ext ) :
+        extname = ''.join( str(extbit).lower() for extbit in ext )
+    else :
+        extname = str(ext).lower()
+    coordfile = "%s.%s.coord"%(os.path.join(psfdir,fileroot),extname)
 
     if not os.path.isdir(psfdir) : os.mkdir( psfdir )
     newcoords=True
@@ -108,10 +124,10 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
         # after running tiny3, we will shift the psf to account for the 
         # fractional coordinate components
         if newcoords: print >>fout,"%6i %6i"%(int(xx),int(yy))
-        if len(x)<100:
-            psfstamp = os.path.join(psfdir,"%s.%i.%02i.fits"%(fileroot,ext,i))
+        if len(x)<=100:
+            psfstamp = os.path.join(psfdir,"%s.%s.%02i.fits"%(fileroot,extname,i))
         else : 
-            psfstamp = os.path.join(psfdir,"%s.%i.%03i.fits"%(fileroot,ext,i))
+            psfstamp = os.path.join(psfdir,"%s.%s.%03i.fits"%(fileroot,extname,i))
         if not os.path.isfile( psfstamp ) : allexist = False
         psfstamplist.append( psfstamp)
         i+=1
@@ -121,34 +137,33 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
         print( "All necessary tinytim psf files exist. Not clobbering.")
         return( psfstamplist )
 
-    queryfile = "%s.%i.query"%(os.path.join(psfdir,fileroot),ext)
+    queryfile = "%s.%s.query"%(os.path.join(psfdir,fileroot),extname)
     fout = open( queryfile ,'w')
     despace = 0.0 # as of tinytim v7.1 : must provide 2ndary mirror despace
     if camera == 'ir' : 
-        print >> fout, """23\n @%s\n %s\n 5\n %s\n %.1f\n %.1f\n %s.%i."""%(
+        print >> fout, """23\n @%s\n %s\n 5\n %s\n %.1f\n %.1f\n %s.%s."""%(
             coordfile, filt.lower(), specfile, 
-            PSFSIZE, despace, os.path.join(psfdir,fileroot), ext )
+            PSFSIZE, despace, os.path.join(psfdir,fileroot), extname )
     elif camera == 'uvis' : 
-        print >> fout,"""22\n %i\n @%s\n %s\n 5\n %s\n %.1f\n %.1f\n %s.%i."""%(
+        print >> fout,"""22\n %i\n @%s\n %s\n 5\n %s\n %.1f\n %.1f\n %s.%s."""%(
             ccdchip, coordfile, filt.lower(), specfile, 
-            PSFSIZE, despace, os.path.join(psfdir,fileroot), ext )
+            PSFSIZE, despace, os.path.join(psfdir,fileroot), extname )
     elif camera == 'acs' : 
-        print >> fout,"""15\n %i\n @%s\n %s\n 5\n %s\n %.1f\n %.1f\n %s.%i."""%(
+        print >> fout,"""15\n %i\n @%s\n %s\n 5\n %s\n %.1f\n %.1f\n %s.%s."""%(
             ccdchip, coordfile, filt.lower(), specfile, 
-            PSFSIZE, despace, os.path.join(psfdir,fileroot), ext )
+            PSFSIZE, despace, os.path.join(psfdir,fileroot), extname )
     fout.close()
     
     # run tiny1 to generate the tinytim paramater file
-    snbinpath = os.getenv('SNBIN')
-    command1 =  "cat %s | %s %s.%i.in"%(
-        queryfile, os.path.join(snbinpath,'tiny1'),
-        os.path.join(psfdir,fileroot), ext )
+    command1 =  "cat %s | %s %s.%s.in"%(
+        queryfile, 'tiny1',
+        os.path.join(psfdir,fileroot), extname )
     if verbose : print command1
     os.system( command1 )
 
     # run tiny2 to generate the distortion-free psfs
-    command2 =  "%s %s.%i.in"%(
-        os.path.join(snbinpath,'tiny2'), os.path.join(psfdir,fileroot), ext )
+    command2 =  "%s %s.%s.in"%(
+        'tiny2', os.path.join(psfdir,fileroot), extname )
     if verbose : print command2
     os.system( command2 ) 
 
@@ -157,18 +172,18 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
     # fluxcorrs = []  # 2014.07.18 Flux correction disabled by Steve
     #run tiny3 and measure the how much offset the geometric distortion adds
     for Npsf in range(len(x)): 
-        command3 =  "%s %s.%i.in POS=%i"%(
-            os.path.join(snbinpath,'tiny3'), os.path.join(psfdir,fileroot), ext, Npsf )
+        command3 =  "%s %s.%s.in POS=%i"%(
+            'tiny3', os.path.join(psfdir,fileroot), extname, Npsf )
         if verbose : 
             print time.asctime() 
             print command3
         os.system( command3 )
         #Calculate the expected center of the image
         #Get the dimensions of the stamp. 
-        if len(x) < 100 : 
-            this_stamp = '%s.%i.%02i.fits' %(os.path.join(psfdir,fileroot),ext,Npsf)
+        if len(x) <= 100 :
+            this_stamp = '%s.%s.%02i.fits' %(os.path.join(psfdir,fileroot),extname,Npsf)
         else : 
-            this_stamp = '%s.%i.%03i.fits' %(os.path.join(psfdir,fileroot),ext,Npsf)
+            this_stamp = '%s.%s.%03i.fits' %(os.path.join(psfdir,fileroot),extname,Npsf)
         xdim = int(pyfits.getval(this_stamp,'NAXIS1'))
         ydim = int(pyfits.getval(this_stamp,'NAXIS2'))
 
@@ -192,8 +207,8 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
         
     # run tiny3 to add in geometric distortion and 5x sub-sampling
     for Npsf in range(len(x)): 
-        command3 =  "%s %s.%i.in POS=%i SUB=5"%(
-            os.path.join(snbinpath,'tiny3'), os.path.join(psfdir,fileroot), ext, Npsf )
+        command3 =  "%s %s.%s.in POS=%i SUB=5"%(
+            'tiny3', os.path.join(psfdir,fileroot), extname, Npsf )
         if verbose : 
             print time.asctime() 
             print command3
@@ -321,7 +336,7 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
         outstamp = psfstamp.replace('.fits','_final.fits')
         hdr['naxis1']=psfdat2.shape[1]
         hdr['naxis2']=psfdat2.shape[0]
-        tofits( outstamp,psfdat2,hdr, clobber=True )
+        psfim.writeto( outstamp, psfdat2, header=hdr, clobber=True )
         outstamplist.append( outstamp )
         if verbose : print("    Shifted, resampled psf written to %s"%outstamp)
 

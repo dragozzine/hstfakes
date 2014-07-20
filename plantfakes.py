@@ -93,7 +93,7 @@ def addfltfakes( fltfile, fltcatfile, psf='TinyTim', verbose=False, clobber=Fals
             # make all the TinyTim psf stamps for this chip
             tinytimroot = fltfile.replace( '_flt.fits','_tinytim')
             psfstamplist = mkfakepsf.mkTinyTimPSF(
-                x[ithissci], y[ithissci], fltfile, ext=['SCI',isci],
+                x[ithissci], y[ithissci], fltfile, ext=('SCI',isci),
                 fileroot=tinytimroot, verbose=verbose, clobber=clobber>1 )
         else :
             # read in a single psf stamp image
@@ -252,6 +252,7 @@ def main():
     # optional arguments :
     parser.add_argument('--morehelp', action='store_true', help='Print more detailed help message and exit.')
     parser.add_argument('--psf', metavar='TinyTim', default='TinyTim', help='PSF model to use. (TinyTim or a fits file name)')
+    parser.add_argument('--spec', metavar='TTspecfile', default='flat_flam_tinytim.dat', help='Spectrum file for defining TinyTime psfs.')
     parser.add_argument('--verbose', action='store_true', help='Turn on verbose mode. [False]', default=False)
     parser.add_argument('--clobber', action='store_true', help='Turn on clobber mode. [False]', default=False)
 
