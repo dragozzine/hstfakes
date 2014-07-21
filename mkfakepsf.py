@@ -199,9 +199,11 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
         meas_xcen, meas_ycen = cntrd.cntrd(this_stamp_data,xcen,ycen,fwhmpix)
 
         #Subtract the expected center from the measured center
+        # note the +1 to account for 0-indexed python convention in cntrd
+        # which is different from the 1-indexed fits convention
         #Save the offsets
-        xgeo_offsets.append(meas_xcen - xcen)
-        ygeo_offsets.append(meas_ycen - ycen)
+        xgeo_offsets.append(meas_xcen + 1 - xcen)
+        ygeo_offsets.append(meas_ycen + 1 - ycen)
         # fluxcorrs.append(meas_fluxcorr)
         #Move this stamp so that it doesn't get overwritten.
         os.rename(this_stamp,os.path.splitext(this_stamp)[0]+'_tiny3.fits')
@@ -340,6 +342,7 @@ def mkTinyTimPSF( x, y, fltfile, ext=1,
         hdr['naxis2']=psfdat2.shape[0]
         pyfits.writeto( outstamp, psfdat2, header=hdr, clobber=True )
         if verbose : print("    Shifted, resampled psf written to %s"%outstamp)
+        outstamplist.append( outstamp )
 
     # return a list of  psf stamps 
     return( outstamplist )    
