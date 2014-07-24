@@ -355,11 +355,12 @@ def rebin(a, factor):
     return a.reshape(a.shape[0]/factor,factor,a.shape[1]/factor,factor).sum(axis=3).sum(axis=1)
     
 def convolvepsf( psfdat, kernel ):
-    """ convolve with the inter-pixel capacitance kernel
+    """ convolve the TinyTim PSF with a blurring kernel.  For WFC3-IR this
+    should be the inter-pixel capacitance kernel
     (see ISR WFC3-2008-41:
-    http://www.stsci.edu/hst/wfc3/documents/ISRs/WFC3-2008-41.pdf
-
-    TODO : include ACS and UVIS charge diffusion kernels
+    http://www.stsci.edu/hst/wfc3/documents/ISRs/WFC3-2008-41.pdf )
+    and for ACS or UVIS this should be the charge diffusion kernel, which is
+    encoded in the fits header.
     """
     from scipy import ndimage
     blurpsf = ndimage.convolve( psfdat, kernel, mode='constant', cval=0.0 )
